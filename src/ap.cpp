@@ -1,11 +1,5 @@
 #include "ap.hpp"
 
-std::shared_ptr<Instruction> createInstruction(const std::string& name) {
-    if (name == "ADD") return std::make_shared<ADD>();
-    if (name == "MUL") return std::make_shared<MUL>();
-    return nullptr;
-}
-
 bool run(const std::vector<std::string>& program, MachineState& state) {
     std::vector<std::shared_ptr<Instruction>> pipeline;
     for (auto& instr_name : program) {
@@ -22,10 +16,26 @@ bool run(const std::vector<std::string>& program, MachineState& state) {
         std::ostringstream oss;
         oss << "===== Start of tick "<< tick <<". =====\n";
         
+        std::unordered_map<int, std::string> reg_in_use;
         for (int i = 0; i < (int)pipeline.size(); ++i) {
-            int stage = tick - i + 1;
-            if (stage >= 1 && stage <= 5)
-                pipeline[i]->execute(stage, oss);
+            std::string instr = pipeline[i]->name();
+            int stage = tick - i;
+            if (stage < 0 || stage > 4)
+                continue;
+            
+            auto required = pipeline[i]->getRegRequired(stage);
+            for (auto& r : required) {
+                if (reg_in_use.find(r) != reg_in_use.end()) {
+                    state.err_msg = "Resource conflict at tick" + std::to_string(tick) + 
+                    ": instruction " + instr + " at stage E" + std::to_string(stage + 1) +
+                    " try to allocate reg R" + std::to_string(r + 1) + " which is already in use by " + reg_in_use[r] + "\n";
+                    return false;
+                }
+                reg_in_use[r] = instr;
+                /* Reg in use */
+                //oss << "R" + std::to_string(r + 1) + " ";
+            }
+            pipeline[i]->execute(stage, oss, state);
         }
         
         oss << "===== End of tick " << tick << ". =====\n";
@@ -50,16 +60,21 @@ void bgcolor(std::string s, int result) {
 int main() {
     MachineState state;
     bool result = false;
+    std::vector<std::vector<std::string>> testcases {{"ADD", "MUL"},
+                                                     {"MUL", "ADD"}};
 
     std::cout << "Emulate Start:\n";
-    result = run({"ADD", "MUL"}, state);
-    
-    if (result)
-        bgcolor("Emulate success", result);
-    else
-        bgcolor("Emulate fail", result);
 
-    std::cout << (result ? state.log : state.err_msg + state.log);
+    for (auto& tc : testcases) {
+        result = run(tc, state);
+    
+        if (result)
+            bgcolor("Emulate success", result);
+        else
+            bgcolor("Emulate fail", result);
+        
+        std::cout << (result ? state.log : state.err_msg + state.log) << std::endl;
+    }
     
     std::cout << "Emulate End\n";
     return 0;
