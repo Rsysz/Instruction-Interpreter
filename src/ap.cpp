@@ -1,7 +1,26 @@
 #include "ap.hpp"
 
+bool printInstructionOnTick(std::vector<std::shared_ptr<Instruction>>& pipeline, int tick, std::ostringstream& oss, MachineState& state) {
+    bool done = true;
+    for (int i = 0; i < (int)pipeline.size(); ++i) {
+        auto instr = pipeline[i]->name();
+        auto& issued = pipeline[i]->issued_tick;
+        if (issued == -1)
+            break;
+        
+        int stage = tick - issued;
+        if (stage < 0 || stage > 4)
+            continue;
+
+        done = false;
+        pipeline[i]->execute(stage, oss, state);
+    }
+    return done;
+}
+
 bool run(const std::vector<std::string>& program, MachineState& state) {
     std::vector<std::shared_ptr<Instruction>> pipeline;
+
     for (auto& instr_name : program) {
         auto instr = createInstruction(instr_name);
         if (!instr) {
@@ -11,35 +30,54 @@ bool run(const std::vector<std::string>& program, MachineState& state) {
         pipeline.push_back(instr);
     }
 
-    int total_tick = pipeline.size() + 4;
-    for (int tick = 0; tick < total_tick; tick++) {
+    int tick = 0, curr = 0;
+    bool done = false;
+
+    while (!done) {
         std::ostringstream oss;
         oss << "===== Start of tick "<< tick <<". =====\n";
         
-        std::unordered_map<int, std::string> reg_in_use;
-        for (int i = 0; i < (int)pipeline.size(); ++i) {
-            std::string instr = pipeline[i]->name();
-            int stage = tick - i;
-            if (stage < 0 || stage > 4)
-                continue;
-            
-            auto required = pipeline[i]->getRegRequired(stage);
-            for (auto& r : required) {
-                if (reg_in_use.find(r) != reg_in_use.end()) {
-                    state.err_msg = "Resource conflict at tick" + std::to_string(tick) + 
-                    ": instruction " + instr + " at stage E" + std::to_string(stage + 1) +
-                    " try to allocate reg R" + std::to_string(r + 1) + " which is already in use by " + reg_in_use[r] + "\n";
-                    return false;
+        if (curr < (int)pipeline.size()) {
+            auto instr = pipeline[curr]->name();
+            auto& issued = pipeline[curr]->issued_tick;
+            /*
+            tick
+            0   1   2   3   4   5
+            ADD ADD ADD ADD ADD ADD
+            */
+            bool canIssued = true;
+            for (int stage = 0; stage < STAGE; stage++) {
+
+                for (int prev = std::max(curr - STAGE + 1, 0); prev < curr; prev++) {
+                    int prev_stage = tick - pipeline[prev]->issued_tick;
+                    if (prev_stage < 0 || prev_stage > 4)
+                        continue;
+
+                    auto& used = pipeline[prev]->getRegRequired(prev_stage);
+                    auto& require = pipeline[curr]->getRegRequired(stage);
+
+                    //std::cout << pipeline[curr]->name() << " " << stage_tick << " " << (int)require.size() << std::endl;
+                    for (auto& r : require) {
+                        if (std::find(used.begin(), used.end(), r) != used.end()) {
+                            state.warn_msg = "Reschedule happen at tick" + std::to_string(tick) + 
+                            ": instruction " + instr + " at stage E" + std::to_string(stage + 1) +
+                            " try to allocate reg R" + std::to_string(r + 1) + " which is already in use\n\n";
+                            canIssued = false;
+                        }
+                    }
                 }
-                reg_in_use[r] = instr;
-                /* Reg in use */
-                //oss << "R" + std::to_string(r + 1) + " ";
             }
-            pipeline[i]->execute(stage, oss, state);
+            
+            if (canIssued) {
+                issued = tick;
+                curr++;
+            }
         }
         
+        done = printInstructionOnTick(pipeline, tick, oss, state);
         oss << "===== End of tick " << tick << ". =====\n";
         state.log += oss.str();
+        tick++;
     }
     
     return true;
@@ -58,14 +96,15 @@ void bgcolor(std::string s, int result) {
 }
 
 int main() {
-    MachineState state;
-    bool result = false;
     std::vector<std::vector<std::string>> testcases {{"ADD", "MUL"},
-                                                     {"MUL", "ADD"}};
+                                                     {"MUL", "ADD"},
+                                                     {"ADD", "ADD", "ADD"}};
 
     std::cout << "Emulate Start:\n";
 
     for (auto& tc : testcases) {
+        MachineState state;
+        bool result = false;
         result = run(tc, state);
     
         if (result)
@@ -73,7 +112,7 @@ int main() {
         else
             bgcolor("Emulate fail", result);
         
-        std::cout << (result ? state.log : state.err_msg + state.log) << std::endl;
+        std::cout << (result ? state.warn_msg + state.log : state.warn_msg + state.log) << std::endl;
     }
     
     std::cout << "Emulate End\n";

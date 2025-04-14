@@ -56,24 +56,28 @@ std::unordered_map<std::string, std::unordered_map<int, std::vector<int>>> resou
         {E3, {R5}},
         {E5, {R3}},
     }},
+    {"INVALID", {
+        {STAGE, {}},
+    }},
 };
 
 struct MachineState {
     std::string log;
     std::string err_msg;
+    std::string warn_msg;
 };
 
 class Instruction {
     public:
         virtual ~Instruction() = default;
         virtual std::string name() const = 0;
-        virtual std::vector<int> getRegRequired(int stage) const {
+        virtual std::vector<int>& getRegRequired(int stage) const {
             std::string instr = name();
             if (resource_table.find(instr) == resource_table.end())
-                return {}; // not found
+                return resource_table["INVALID"][STAGE]; // not found
             
             if (resource_table[instr].find(stage) == resource_table[instr].end())
-                return {}; // no resource required
+                return resource_table["INVALID"][STAGE]; // no resource required
             
             return resource_table[instr][stage];
         }
@@ -83,6 +87,8 @@ class Instruction {
             UNUSED(state);
             oss << name() + "_E" + std::to_string(stage + 1) + ";\n";
         }
+
+        int issued_tick = -1;
 };
     
 class ADD : public Instruction {
